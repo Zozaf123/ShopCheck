@@ -321,64 +321,71 @@ async function createShopEmbeds(shop, username) {
     return embeds;
 }
 
-// Send shop via the main SkinPeek bot
+// Send shop via Discord webhook (simpler approach)
+async function sendShopViaWebhook(shopEmbeds) {
+    console.log("Sending shop via Discord webhook...");
+
+    // Load config to get webhook URL
+    const config = await import("./misc/config.js");
+    const webhookUrl = config.default.webhookUrl;
+
+    if (!webhookUrl) {
+        throw new Error("No webhook URL found in config.json. Please set webhookUrl in your config.");
+    }
+
+    const webhookData = {
+        embeds: shopEmbeds
+    };
+
+    const req = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(webhookData)
+    });
+
+    if (req.statusCode >= 200 && req.statusCode < 300) {
+        console.log('✅ Shop sent successfully via webhook!');
+    } else {
+        throw new Error(`Webhook failed with status ${req.statusCode}: ${req.body}`);
+    }
+}
+
+// Alternative: Send shop by starting bot and using IPC
 async function sendShopViaBot(shopEmbeds) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         console.log("Starting SkinPeek bot to send shop...");
 
-        // Spawn the main SkinPeek bot
-        const botProcess = spawn('node', ['SkinPeek.js'], {
+        // Create a temporary file with the shop data
+        const tempFile = `temp_shop_${Date.now()}.json`;
+        const fs = await import('fs');
+
+        try {
+            fs.writeFileSync(tempFile, JSON.stringify(shopEmbeds, null, 2));
+        } catch (error) {
+            reject(new Error(`Failed to create temp file: ${error.message}`));
+            return;
+        }
+
+        // Spawn the main SkinPeek bot with special arguments
+        const botProcess = spawn('node', ['SkinPeek.js', '--send-shop', tempFile, DISCORD_CHANNEL_ID], {
             stdio: ['pipe', 'pipe', 'pipe'],
             cwd: process.cwd()
         });
 
-        let botReady = false;
         let shopSent = false;
 
-        // Listen for bot ready message
+        // Listen for completion message
         botProcess.stdout.on('data', (data) => {
             const output = data.toString();
             console.log('Bot:', output.trim());
 
-            if (output.includes('Logged in as') && !botReady) {
-                botReady = true;
-                console.log('✅ Bot is ready, sending shop...');
-
-                // Give the bot a moment to fully initialize
-                setTimeout(async () => {
-                    try {
-                        // Import the bot's client to send the message
-                        const { client } = await import('./discord/bot.js');
-
-                        if (client && client.isReady()) {
-                            const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
-                            if (channel) {
-                                await channel.send({ embeds: shopEmbeds });
-                                console.log('✅ Shop sent successfully via bot!');
-                                shopSent = true;
-
-                                // Stop the bot after sending
-                                setTimeout(() => {
-                                    console.log('Stopping bot...');
-                                    botProcess.kill('SIGINT');
-                                    resolve();
-                                }, 2000);
-                            } else {
-                                console.error('❌ Could not find Discord channel');
-                                botProcess.kill('SIGINT');
-                                reject(new Error('Channel not found'));
-                            }
-                        } else {
-                            console.error('❌ Bot client not ready');
-                            botProcess.kill('SIGINT');
-                            reject(new Error('Bot client not ready'));
-                        }
-                    } catch (error) {
-                        console.error('❌ Error sending shop:', error);
-                        botProcess.kill('SIGINT');
-                        reject(error);
-                    }
-                }, 3000); // Wait 3 seconds for bot to be fully ready
+            if (output.includes('Shop sent successfully')) {
+                shopSent = true;
+                console.log('✅ Shop sent successfully via bot!');
+                botProcess.kill('SIGINT');
+                resolve();
             }
         });
 
@@ -388,6 +395,14 @@ async function sendShopViaBot(shopEmbeds) {
 
         botProcess.on('close', (code) => {
             console.log(`Bot process exited with code ${code}`);
+
+            // Clean up temp file
+            try {
+                fs.unlinkSync(tempFile);
+            } catch (error) {
+                console.warn('Failed to clean up temp file:', error.message);
+            }
+
             if (!shopSent) {
                 reject(new Error('Bot exited before shop was sent'));
             }
@@ -443,8 +458,13 @@ async function main() {
         // Create embeds
         const embeds = await createShopEmbeds(shop, auth.username);
 
-        // Send via bot
-        await sendShopViaBot(embeds);
+        // Try to send via webhook first, fallback to bot
+        try {
+            await sendShopViaWebhook(embeds);
+        } catch (webhookError) {
+            console.log("Webhook failed, trying bot method:", webhookError.message);
+            await sendShopViaBot(embeds);
+        }
 
         console.log("=".repeat(50));
         console.log("✅ Shop successfully sent to Discord!");

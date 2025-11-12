@@ -1,6 +1,7 @@
 // autoTriggerShop.js
 import { Client, GatewayIntentBits } from "discord.js";
-import { getShop, getUser } from "./valorant/shop.js"; // replace with your actual import paths
+import { getShop } from "./valorant/shop.js";
+import { getUser } from "./valorant/auth.js"; // <-- import directly from auth.js
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 

@@ -20,10 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-
-      - name: Run Skinpeek
-        run: node SkinPeek.js
-
+        
       - name: Run autoTriggerShop
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}   # required

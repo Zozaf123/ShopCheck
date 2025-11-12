@@ -1,43 +1,64 @@
 // autoTriggerShop.js
 // Auto-run the /shop command for a target user and post the result, then exit.
-// Safe: Put your bot token into DISCORD_TOKEN env (GitHub secret). Do not hardcode tokens.
 
 import { Client, GatewayIntentBits } from "discord.js";
+import { fileURLToPath } from "url";
+import path from "path";
 
-// NOTE: Use 'with { type: "json" }' to import JSON in ESM
+// Load config.json if it exists
 let config = {};
 try {
-  // If your project uses "type": "module", Node supports this syntax
-  // (older Node may need `assert { type: "json" }` or require()).
-  config = (await import("./misc/config.json" /* with { type: "json" } */)).default ?? {};
-} catch (e) {
-  // ignore if config not present
-  config = {};
+  config = (await import("./misc/config.json")).default ?? {};
+} catch {}
+
+// Utility helpers
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const tryImport = async (p) => { try { return await import(p); } catch { return null; } };
+
+// --- Helper: format shop data into readable text ---
+function formatShopText(shopResp, targetUser) {
+  if (!shopResp || !shopResp.success) {
+    return `${targetUser.username} — Failed to fetch shop (no success).`;
+  }
+
+  const offers = shopResp.shop?.SkinsPanelLayout?.SingleItemOffers ?? [];
+  const accessories = shopResp.shop?.AccessoryStore?.AccessoryStoreOffers ?? [];
+  const bundles = shopResp.shop?.FeaturedBundle?.Bundles ?? [];
+
+  let msg = `🛒 Shop for ${targetUser.username}:\n`;
+  msg += `- Skins: ${offers.length}\n`;
+  msg += `- Accessories: ${accessories.length}\n`;
+  msg += `- Bundles: ${bundles.length}\n`;
+
+  if (offers.length) {
+    const offerList = offers.slice(0, 8).map((o, i) => `${i + 1}. ${o}`).join("\n");
+    msg += `\nTop Skins:\n${offerList}`;
+  }
+
+  if (accessories.length) msg += `\nAccessories: ${accessories.map(a => a).join(", ")}`;
+  if (bundles.length) msg += `\nBundles: ${bundles.map(b => b.Bundle?.DataAssetID ?? b.BundleID ?? "Unknown").join(", ")}`;
+
+  return msg;
 }
 
-// utility helpers
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tryImport = async (p) => {
-  try {
-    return await import(p);
-  } catch (e) {
-    return null;
-  }
-};
-
+// Main async IIFE
 (async () => {
-  // --- Token selection (env preferred) ---
+  // --- Token selection ---
   const token = process.env.DISCORD_TOKEN || config.token;
   if (!token) {
-    console.error("No Discord token found. Set DISCORD_TOKEN env (recommended) or add token to misc/config.json (not recommended).");
+    console.error("No Discord token found. Set DISCORD_TOKEN env or config.json.");
     process.exit(1);
   }
 
-  // --- Candidate paths to find the shop handler or shop-fetching functions ---
+  // --- Attempt dynamic imports ---
   const fetchCandidates = [
-    "./valorant/shop.js",
+    "./SkinPeek.js",
+    "./commands/shop.js",
+    "./commands/shop/index.js",
+    "./misc/util.js",
+    "./shop.js",
     "./getShop.js",
-    "./src/commands/shop.js",
+    "./src/commands/shop.js"
   ];
 
   let fetchShopFunc = null;
@@ -45,14 +66,11 @@ const tryImport = async (p) => {
   for (const p of fetchCandidates) {
     const mod = await tryImport(p);
     if (!mod) continue;
-    // look for common names
     fetchShopFunc = fetchShopFunc || (mod.fetchShop ?? mod.handleShop ?? mod.default?.fetchShop ?? mod.default?.handleShop ?? null);
-    // also capture module in case it exports client
     if (!moduleWithClient) moduleWithClient = mod;
   }
 
-  // Also try to import a module that directly exports getShop/getOffers (shop logic you pasted earlier)
-  const shopModCandidates = ["./shopModule.js", "./shop.js", "./getShop.js", "./misc/shop.js", "./modules/shop.js", "./src/shop.js"];
+  const shopModCandidates = ["./shopModule.js","./shop.js","./getShop.js","./misc/shop.js","./modules/shop.js","./src/shop.js"];
   let getShopFunc = null;
   for (const p of shopModCandidates) {
     const m = await tryImport(p);
@@ -61,41 +79,21 @@ const tryImport = async (p) => {
     if (getShopFunc) break;
   }
 
-  // Try to import auth.getUser so we can locate valorantUser object if needed
   const authMod = await tryImport("./auth.js");
   const getUser = authMod?.getUser ?? null;
 
-  // --- Prepare or reuse a Discord client ---
-  // If the imported main module exported a client, use it. Otherwise create our own client.
+  // --- Prepare or reuse client ---
   let client = moduleWithClient?.client ?? moduleWithClient?.default?.client ?? null;
-  let usedExternalClient = !!client;
-
   if (!client) {
     client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
-    try {
-      await client.login(token);
-    } catch (e) {
-      console.error("Failed to login with provided token:", e);
-      process.exit(1);
-    }
+    try { await client.login(token); } catch (e) { console.error("Login failed:", e); process.exit(1); }
   } else {
-    // If we are using an external client exported from SkinPeek.js, ensure it's logged in.
-    if (!client.readyAt) {
-      try {
-        await new Promise((res) => client.once("ready", res));
-      } catch (e) {
-        console.error("External client failed to become ready:", e);
-        process.exit(1);
-      }
-    }
+    if (!client.readyAt) await new Promise(res => client.once("ready", res));
   }
-
-  if (!client.readyAt) {
-    await new Promise((res) => client.once("ready", res));
-  }
+  if (!client.readyAt) await new Promise(res => client.once("ready", res));
   console.log("✅ Logged in as", client.user.tag);
 
-  // --- Ensure we have guild info: fetch guilds from API (works in CI) ---
+  // --- Fetch guild ---
   let guild;
   try {
     const guildsMap = await client.guilds.fetch();
@@ -104,55 +102,30 @@ const tryImport = async (p) => {
     guild = await client.guilds.fetch(firstGuildId);
     console.log(`Using guild: ${guild.name} (${guild.id})`);
   } catch (err) {
-    console.error("Error fetching guilds (bot likely not in any guilds for this token):", err);
+    console.error("Error fetching guilds:", err);
     await client.destroy().catch(() => {});
     process.exit(1);
   }
 
-  // --- Choose channel to post in ---
-  // Priority: env TARGET_CHANNEL_ID -> config.logToChannel -> first viewable text channel
+  // --- Choose channel ---
   const chosenChannelId = process.env.TARGET_CHANNEL_ID || config.logToChannel || null;
   let channel = null;
-  try {
-    if (chosenChannelId) {
-      try { channel = await guild.channels.fetch(chosenChannelId); } catch (e) { channel = null; }
-    }
-    if (!channel) {
-      // ensure the guild channels are fetched
-      try { await guild.channels.fetch(); } catch (e) { /* ignore */ }
-      channel = guild.channels.cache.find((ch) => ch.isTextBased?.() && ch.viewable) ?? null;
-    }
-    if (!channel) throw new Error("No accessible text channel found in the guild.");
-    console.log(`Using channel: ${channel.name ?? channel.id}`);
-  } catch (err) {
-    console.error("Error selecting channel:", err);
-    await client.destroy().catch(() => {});
-    process.exit(1);
-  }
+  if (chosenChannelId) channel = await guild.channels.fetch(chosenChannelId).catch(() => null);
+  if (!channel) channel = guild.channels.cache.find(ch => ch.isTextBased?.() && ch.viewable) ?? null;
+  if (!channel) { console.error("No accessible text channel."); await client.destroy(); process.exit(1); }
+  console.log(`Using channel: ${channel.name ?? channel.id}`);
 
-  // --- Determine target user (the user whose shop we fetch / mention) ---
+  // --- Determine target user ---
   const targetUserId = process.env.TARGET_USER_ID || config.ownerId || null;
   let targetUser = null;
-  try {
-    if (targetUserId) {
-      try { targetUser = await client.users.fetch(targetUserId); } catch (e) { targetUser = null; }
-    }
-    if (!targetUser) {
-      // fallback: pick a member from the guild (first non-bot member if possible)
-      try {
-        const members = await guild.members.fetch({ limit: 10 });
-        const firstHuman = members.find(m => !m.user.bot);
-        targetUser = firstHuman?.user ?? members.first()?.user ?? (await client.users.fetch(client.user.id));
-      } catch (e) {
-        targetUser = await client.users.fetch(client.user.id);
-      }
-    }
-  } catch (err) {
-    console.warn("Could not determine a target user; defaulting to bot user:", err);
-    targetUser = await client.users.fetch(client.user.id);
+  if (targetUserId) targetUser = await client.users.fetch(targetUserId).catch(() => null);
+  if (!targetUser) {
+    const members = await guild.members.fetch({ limit: 10 }).catch(() => new Map());
+    const firstHuman = [...members.values()].find(m => !m.user.bot);
+    targetUser = firstHuman?.user ?? client.user;
   }
 
-  // --- Build a fake interaction object compatible with your /shop handler ---
+  // --- Build fake interaction ---
   const fakeInteraction = {
     isCommand: () => true,
     isAutocomplete: () => false,
@@ -160,112 +133,63 @@ const tryImport = async (p) => {
     user: targetUser,
     guild,
     channel,
-    options: {
-      // your handler calls `interaction.options.getUser("user")` — return null to simulate no @user argument
-      getUser: (name) => null,
-    },
+    options: { getUser: () => null },
     locale: "en-US",
     reply: async (payload) => {
       const content = typeof payload === "string" ? payload : payload.content ?? "";
       const embeds = payload.embeds ?? [];
-      // If ephemeral, can't send to channel — just send to channel anyway because automation is visible
-      await channel.send({ content, embeds }).catch((e) => console.error("Failed to send reply payload:", e));
-      // return an object resembling a Message for followUp usage
+      await channel.send({ content, embeds }).catch(console.error);
       return {};
     },
-    deferReply: async () => { return; },
-    editReply: async (payload) => {
-      const content = typeof payload === "string" ? payload : payload.content ?? "";
-      const embeds = payload.embeds ?? [];
-      await channel.send({ content, embeds }).catch((e) => console.error("Failed to send editReply payload:", e));
-    },
-    followUp: async (payload) => {
-      const content = typeof payload === "string" ? payload : payload.content ?? "";
-      const embeds = payload.embeds ?? [];
-      await channel.send({ content, embeds }).catch((e) => console.error("Failed to send followUp payload:", e));
-    },
-    respond: async (choices) => { /* no-op for autocomplete */ },
+    deferReply: async () => {},
+    editReply: async (payload) => { await channel.send({ content: payload.content ?? "", embeds: payload.embeds ?? [] }).catch(console.error); },
+    followUp: async (payload) => { await channel.send({ content: payload.content ?? "", embeds: payload.embeds ?? [] }).catch(console.error); },
+    respond: async () => {},
   };
 
-  // Helper to mention the user in the message
-  const mention = (u) => `<@${u.id}>`;
+  // --- Helper mention ---
+  const mention = u => `<@${u.id}>`;
 
-  // --- Now the actual triggering logic (tries multiple strategies) ---
-
+  // --- Trigger shop logic ---
   let triggered = false;
 
-  // Strategy A: call an imported fetchShop/handleShop directly if available
+  // Strategy A: fetchShopFunc
   if (fetchShopFunc) {
     try {
-      console.log("Calling imported fetchShop/handleShop directly...");
-      // Your handler (in interactionCreate) calls: fetchShop(interaction, valorantUser, targetUserId)
-      // Try to obtain valorantUser via auth.getUser if available
-      let valorantUser = null;
-      if (getUser) {
-        try { valorantUser = getUser(targetUser.id); } catch (e) { valorantUser = null; }
-      }
-      // call with three args (best match), fallback to single arg
-      try {
-        await fetchShopFunc(fakeInteraction, valorantUser, targetUser.id);
-      } catch (e) {
-        await fetchShopFunc(fakeInteraction);
+      let valorantUser = getUser ? getUser(targetUser.id) : null;
+      const result = await fetchShopFunc(fakeInteraction, valorantUser, targetUser.id);
+      if (result?.shop) {
+        const textMessage = formatShopText(result, targetUser);
+        await channel.send(textMessage);
       }
       triggered = true;
-      console.log("fetchShop invoked.");
-    } catch (err) {
-      console.warn("Imported fetchShop invocation failed:", err);
-    }
+    } catch (e) { console.warn("fetchShopFunc failed:", e); }
   }
 
-  // Strategy B: if there's a getShop function available, call it and post a simple formatted message
+  // Strategy B: getShopFunc
   if (!triggered && getShopFunc) {
     try {
-      console.log("Calling getShop() directly and posting summary...");
       const shopResp = await getShopFunc(targetUser.id);
-      if (!shopResp || !shopResp.success) {
-        await channel.send(`${mention(targetUser)} — Failed to fetch shop (getShop returned no success).`);
-      } else {
-        // Basic summary: list offers (first up to 8)
-        const offers = shopResp.shop?.SkinsPanelLayout?.SingleItemOffers ?? [];
-        const accessory = shopResp.shop?.AccessoryStore?.AccessoryStoreOffers ?? [];
-        const bundleCount = (shopResp.shop?.FeaturedBundle?.Bundles ?? []).length ?? 0;
-        let msg = `${mention(targetUser)} — Shop fetched: ${offers.length} offers, ${bundleCount} bundles.`;
-        if (offers.length) {
-          const shown = offers.slice(0, 8).map((o, i) => `\n${i+1}. ${o}`).join("");
-          msg += `\nOffers (first ${Math.min(8, offers.length)}):${shown}`;
-        }
-        if (accessory.length) msg += `\nAccessories: ${accessory.length}`;
-        await channel.send(msg);
-      }
+      const textMessage = formatShopText(shopResp, targetUser);
+      await channel.send(textMessage);
       triggered = true;
-    } catch (err) {
-      console.warn("getShop invocation failed:", err);
-    }
+    } catch (e) { console.warn("getShopFunc failed:", e); }
   }
 
-  // Strategy C: emit interactionCreate on the current client (works if your main bot's handler is registered on this client)
+  // Strategy C: fallback to interactionCreate
   if (!triggered) {
     try {
-      console.log("Emitting 'interactionCreate' on the client (fallback)...");
       client.emit("interactionCreate", fakeInteraction);
       triggered = true;
-    } catch (err) {
-      console.warn("Emitting interactionCreate failed:", err);
-    }
+    } catch (e) { console.warn("Fallback interactionCreate failed:", e); }
   }
 
-  // If still not triggered, give a clear instruction for a one-line change to SkinPeek.js
   if (!triggered) {
-    console.error("\n⚠️ Automation couldn't trigger your /shop handler automatically.");
-    console.error("If SkinPeek.js creates a Discord client internally, please add this single line at the bottom of SkinPeek.js:");
-    console.error("\n  // export the bot client so automation can reuse it\n  export { client };\n");
-    console.error("Or, export your shop function (one of these):\n  export async function fetchShop(interaction, valorantUser, targetUserId) { ... }\n");
+    console.error("\n⚠️ Could not trigger shop automatically. Consider exporting client or fetchShop from SkinPeek.js.");
   }
 
-  // Allow a short grace period for messages to go out and followups to run
   await sleep(8000);
-
-  try { await client.destroy(); } catch (e) {}
+  await client.destroy().catch(() => {});
   console.log("Done — exiting.");
   process.exit(0);
 })();

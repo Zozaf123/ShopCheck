@@ -44,7 +44,7 @@ async function runSkinPeekAndWait() {
 
 async function triggerShop() {
   await runSkinPeekAndWait();
-
+  return
   // Now SkinPeek has logged "Skins loaded!"
   console.log("Proceeding to shop fetch...");
 

@@ -1,28 +1,36 @@
 import { spawn } from "child_process";
-import { getUser } from './valorant/auth.js';
-import { getShop } from './valorant/shop.js';
+import { getUser } from "./valorant/auth.js";
+import { getShop } from "./valorant/shop.js";
 
 async function runSkinPeekAndWait() {
   return new Promise((resolve, reject) => {
     console.log("Launching SkinPeek.js...");
 
-    const process = spawn("node", ["SkinPeek.js"], { stdio: ["ignore", "pipe", "pipe"] });
+    const process = spawn("node", ["SkinPeek.js"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env }, // inherit env
+    });
 
     let skinsLoaded = false;
 
     process.stdout.on("data", data => {
       const text = data.toString().trim();
-      console.log(text);
+      console.log(`[SkinPeek] ${text}`);
 
       if (text.includes("Skins loaded!")) {
         skinsLoaded = true;
-        console.log("Detected 'Skins loaded!' — continuing...");
-        resolve(); // Resolve once
+        console.log("✅ Detected 'Skins loaded!' — continuing...");
+        resolve(); // Allow continuation
       }
     });
 
     process.stderr.on("data", data => {
-      console.error("SkinPeek error:", data.toString());
+      console.error(`[SkinPeek ERR] ${data.toString()}`);
+    });
+
+    process.on("error", err => {
+      console.error("❌ Failed to spawn SkinPeek:", err);
+      reject(err);
     });
 
     process.on("close", code => {
@@ -36,6 +44,9 @@ async function runSkinPeekAndWait() {
 
 async function triggerShop() {
   await runSkinPeekAndWait();
+
+  // Now SkinPeek has logged "Skins loaded!"
+  console.log("Proceeding to shop fetch...");
 
   const client = global.client;
   if (!client) {
@@ -63,8 +74,7 @@ async function triggerShop() {
     embeds: message.embeds,
   });
 
-  console.log("Shop posted. Exiting.");
-
+  console.log("✅ Shop posted. Exiting.");
   client.destroy();
   process.exit(0);
 }

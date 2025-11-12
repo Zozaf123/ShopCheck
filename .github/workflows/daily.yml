@@ -30,8 +30,7 @@ jobs:
           tokenPrefix: '{{'
           tokenSuffix: '}}'
           replacements: |
-            SECRET_API_KEY=${{ secrets.API_KEY }}
-            SECRET_DB_URL=${{ secrets.DATABASE_URL }}
+            SECRET_API_KEY=${{ secrets.DISCORD_TOKEN }}
       - name: Use updated config
         run: |
           cat config.json

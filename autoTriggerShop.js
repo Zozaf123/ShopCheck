@@ -35,11 +35,7 @@ const tryImport = async (p) => {
 
   // --- Candidate paths to find the shop handler or shop-fetching functions ---
   const fetchCandidates = [
-    "./SkinPeek.js",
-    "./commands/shop.js",
-    "./commands/shop/index.js",
-    "./misc/util.js",
-    "./shop.js",
+    "./valorant/shop.js",
     "./getShop.js",
     "./src/commands/shop.js",
   ];

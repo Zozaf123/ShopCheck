@@ -1,7 +1,7 @@
 // autoTriggerShop.js
 import './SkinPeek.js'; // run your main bot file like normal
 import { getUser } from './valorant/auth.js'; // import getUser from auth.js
-import { fetchShop } from './valorant/shop.js'; // replace with actual path
+import { getShop } from './valorant/shop.js'; // replace with actual path
 
 async function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

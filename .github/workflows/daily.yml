@@ -1,0 +1,25 @@
+name: Run Daily Script
+
+on:
+  schedule:
+    - cron: '1 0 * * *'   # runs every day at 0:00 UTC
+  workflow_dispatch:       # lets you trigger it manually, too
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run your script
+        run: node SkinPeek.js

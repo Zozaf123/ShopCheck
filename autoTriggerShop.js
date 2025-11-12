@@ -1,20 +1,164 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
-import { fetch, stringifyCookies, parseSetCookie, extractTokensFromUri, decodeToken, userRegion, riotClientHeaders } from "./misc/util.js";
-import { getSkin } from "./valorant/cache.js";
-import { loadConfig } from "./misc/config.js";
+import { spawn } from "child_process";
 
 // ============================================
 // CONFIGURATION - EDIT THESE VALUES
 // ============================================
 
 // Your Riot Games cookie string (from auth.riotgames.com)
-const RIOT_COOKIE = process.env.RIOT_ID;
+const RIOT_COOKIE = process.env.RIOT_ID || "paste_your_cookie_here";
 
 // Discord channel ID where the shop will be sent
-const DISCORD_CHANNEL_ID = process.env.CHANNEL_ID;
+const DISCORD_CHANNEL_ID = process.env.CHANNEL_ID || "paste_your_channel_id_here";
 
-// Discord bot token (from config.json)
-let DISCORD_BOT_TOKEN = process.env.DISCORD_TOKEN;
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+async function fetch(url, options = {}) {
+    const https = await import('https');
+    const http = await import('http');
+    const urlModule = await import('url');
+
+    return new Promise((resolve, reject) => {
+        const parsedUrl = urlModule.parse(url);
+        const isHttps = parsedUrl.protocol === 'https:';
+
+        const reqOptions = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (isHttps ? 443 : 80),
+            path: parsedUrl.path,
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            ...options
+        };
+
+        const req = (isHttps ? https : http).request(reqOptions, (res) => {
+            let body = '';
+            res.on('data', (chunk) => {
+                body += chunk;
+            });
+            res.on('end', () => {
+                resolve({
+                    statusCode: res.statusCode,
+                    headers: res.headers,
+                    body: body
+                });
+            });
+        });
+
+        req.on('error', (err) => {
+            reject(err);
+        });
+
+        if (options.body) {
+            req.write(options.body);
+        }
+
+        req.end();
+    });
+}
+
+function parseSetCookie(cookieHeader) {
+    if (!cookieHeader) return {};
+
+    const cookies = {};
+    const cookieStrings = Array.isArray(cookieHeader) ? cookieHeader : [cookieHeader];
+
+    for (const cookieStr of cookieStrings) {
+        const parts = cookieStr.split(';')[0].split('=');
+        if (parts.length === 2) {
+            cookies[parts[0].trim()] = parts[1].trim();
+        }
+    }
+
+    return cookies;
+}
+
+function extractTokensFromUri(uri) {
+    const urlParams = new URLSearchParams(uri.split('#')[1] || '');
+    const accessToken = urlParams.get('access_token');
+    const idToken = urlParams.get('id_token');
+    return [accessToken, idToken];
+}
+
+function decodeToken(token) {
+    const payload = token.split('.')[1];
+    const decoded = Buffer.from(payload, 'base64').toString('utf-8');
+    return JSON.parse(decoded);
+}
+
+function riotClientHeaders() {
+    return {
+        'User-Agent': 'ShooterGame/13 Windows/10.0.19043.1.256.64bit',
+        'X-Riot-ClientVersion': 'release-08.07-shipping-22-806071',
+        'X-Riot-ClientPlatform': 'ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQzLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9'
+    };
+}
+
+// ============================================
+// SKIN CACHE (simplified)
+// ============================================
+
+let skinsCache = null;
+
+async function loadSkinData() {
+    if (skinsCache) return skinsCache;
+
+    console.log("Loading skin data from Valorant API...");
+
+    try {
+        const req = await fetch("https://valorant-api.com/v1/weapons?language=all");
+        if (req.statusCode !== 200) {
+            console.error("Failed to fetch skin data");
+            return null;
+        }
+
+        const json = JSON.parse(req.body);
+        if (json.status !== 200) {
+            console.error("Invalid skin data response");
+            return null;
+        }
+
+        skinsCache = {};
+        for (const weapon of json.data) {
+            for (const skin of weapon.skins) {
+                const levelOne = skin.levels[0];
+
+                let icon;
+                if (skin.themeUuid === "5a629df4-4765-0214-bd40-fbb96542941f") { // default skins
+                    icon = skin.chromas[0] && skin.chromas[0].fullRender;
+                } else {
+                    for (let i = 0; i < skin.levels.length; i++) {
+                        if (skin.levels[i] && skin.levels[i].displayIcon) {
+                            icon = skin.levels[i].displayIcon;
+                            break;
+                        }
+                    }
+                }
+                if (!icon) icon = null;
+
+                skinsCache[levelOne.uuid] = {
+                    uuid: levelOne.uuid,
+                    names: skin.displayName,
+                    icon: icon,
+                    rarity: skin.contentTierUuid,
+                    price: null // We'll set this later if available
+                };
+            }
+        }
+
+        console.log(`✅ Loaded ${Object.keys(skinsCache).length} skins`);
+        return skinsCache;
+    } catch (error) {
+        console.error("Error loading skin data:", error);
+        return null;
+    }
+}
+
+async function getSkin(uuid) {
+    if (!skinsCache) await loadSkinData();
+    return skinsCache ? skinsCache[uuid] : null;
+}
 
 // ============================================
 // MAIN SCRIPT
@@ -22,14 +166,10 @@ let DISCORD_BOT_TOKEN = process.env.DISCORD_TOKEN;
 
 const VAL_COLOR_1 = 0xFD4553;
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
-});
-
 // Authenticate with Riot using cookies
 async function authenticateWithCookies(cookies) {
     console.log("Authenticating with cookies...");
-    
+
     const req = await fetch("https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&scope=account%20openid&nonce=1", {
         headers: {
             cookie: cookies
@@ -52,7 +192,7 @@ async function authenticateWithCookies(cookies) {
     };
 
     const [rso, idt] = extractTokensFromUri(req.headers.location);
-    
+
     if (!rso) {
         console.error("Failed to extract RSO token");
         return null;
@@ -83,7 +223,7 @@ async function authenticateWithCookies(cookies) {
             'id_token': idt,
         })
     });
-    
+
     const regionJson = JSON.parse(regionReq.body);
     const region = regionJson.affinities.live;
 
@@ -93,7 +233,7 @@ async function authenticateWithCookies(cookies) {
             'Authorization': "Bearer " + rso
         }
     });
-    
+
     const userInfoJson = JSON.parse(userInfoReq.body);
     const username = userInfoJson.acct.game_name + "#" + userInfoJson.acct.tag_line;
 
@@ -112,7 +252,7 @@ async function authenticateWithCookies(cookies) {
 // Fetch shop data
 async function fetchShop(auth) {
     console.log("Fetching shop data...");
-    
+
     const req = await fetch(`https://pd.${auth.region}.a.pvp.net/store/v3/storefront/${auth.puuid}`, {
         method: "POST",
         headers: {
@@ -129,9 +269,9 @@ async function fetchShop(auth) {
     }
 
     const json = JSON.parse(req.body);
-    
+
     console.log("✅ Shop data fetched successfully!");
-    
+
     return {
         offers: json.SkinsPanelLayout.SingleItemOffers,
         expires: Math.floor(Date.now() / 1000) + json.SkinsPanelLayout.SingleItemOffersRemainingDurationInSeconds
@@ -141,9 +281,9 @@ async function fetchShop(auth) {
 // Create embeds for shop
 async function createShopEmbeds(shop, username) {
     console.log("Creating shop embeds...");
-    
+
     const embeds = [];
-    
+
     // Header embed
     embeds.push({
         description: `**${username}'s Shop**\nExpires <t:${shop.expires}:R>`,
@@ -153,7 +293,7 @@ async function createShopEmbeds(shop, username) {
     // Skin embeds
     for (const uuid of shop.offers) {
         const skin = await getSkin(uuid);
-        
+
         if (skin) {
             const colorMap = {
                 '0cebb8be-46d7-c12a-d306-e9907bfc5a25': 0x009984,
@@ -164,7 +304,7 @@ async function createShopEmbeds(shop, username) {
             };
 
             const color = colorMap[skin.rarity] || VAL_COLOR_1;
-            
+
             embeds.push({
                 title: skin.names["en-US"],
                 description: skin.price ? `VP ${skin.price}` : "Price unknown",
@@ -177,8 +317,96 @@ async function createShopEmbeds(shop, username) {
     }
 
     console.log("✅ Created embeds for shop!");
-    
+
     return embeds;
+}
+
+// Send shop via the main SkinPeek bot
+async function sendShopViaBot(shopEmbeds) {
+    return new Promise((resolve, reject) => {
+        console.log("Starting SkinPeek bot to send shop...");
+
+        // Spawn the main SkinPeek bot
+        const botProcess = spawn('node', ['SkinPeek.js'], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            cwd: process.cwd()
+        });
+
+        let botReady = false;
+        let shopSent = false;
+
+        // Listen for bot ready message
+        botProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log('Bot:', output.trim());
+
+            if (output.includes('Logged in as') && !botReady) {
+                botReady = true;
+                console.log('✅ Bot is ready, sending shop...');
+
+                // Give the bot a moment to fully initialize
+                setTimeout(async () => {
+                    try {
+                        // Import the bot's client to send the message
+                        const { client } = await import('./discord/bot.js');
+
+                        if (client && client.isReady()) {
+                            const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
+                            if (channel) {
+                                await channel.send({ embeds: shopEmbeds });
+                                console.log('✅ Shop sent successfully via bot!');
+                                shopSent = true;
+
+                                // Stop the bot after sending
+                                setTimeout(() => {
+                                    console.log('Stopping bot...');
+                                    botProcess.kill('SIGINT');
+                                    resolve();
+                                }, 2000);
+                            } else {
+                                console.error('❌ Could not find Discord channel');
+                                botProcess.kill('SIGINT');
+                                reject(new Error('Channel not found'));
+                            }
+                        } else {
+                            console.error('❌ Bot client not ready');
+                            botProcess.kill('SIGINT');
+                            reject(new Error('Bot client not ready'));
+                        }
+                    } catch (error) {
+                        console.error('❌ Error sending shop:', error);
+                        botProcess.kill('SIGINT');
+                        reject(error);
+                    }
+                }, 3000); // Wait 3 seconds for bot to be fully ready
+            }
+        });
+
+        botProcess.stderr.on('data', (data) => {
+            console.error('Bot Error:', data.toString().trim());
+        });
+
+        botProcess.on('close', (code) => {
+            console.log(`Bot process exited with code ${code}`);
+            if (!shopSent) {
+                reject(new Error('Bot exited before shop was sent'));
+            }
+        });
+
+        botProcess.on('error', (error) => {
+            console.error('Failed to start bot:', error);
+            reject(error);
+        });
+
+        // Timeout after 30 seconds
+        setTimeout(() => {
+            if (!shopSent) {
+                console.error('❌ Timeout: Bot took too long to send shop');
+                botProcess.kill('SIGINT');
+                reject(new Error('Timeout'));
+            }
+        }, 30000);
+    });
 }
 
 async function main() {
@@ -187,24 +415,14 @@ async function main() {
         console.log("Starting Valorant Shop Fetch Script");
         console.log("=".repeat(50));
 
-        // Load config
-        loadConfig();
-        const config = await import("./misc/config.js");
-        DISCORD_BOT_TOKEN = config.default.token;
-
-        if (!DISCORD_BOT_TOKEN) {
-            console.error("❌ No Discord bot token found in config.json!");
-            process.exit(1);
-        }
-
         // Validate configuration
         if (RIOT_COOKIE === "paste_your_cookie_here") {
-            console.error("❌ Please configure RIOT_COOKIE in the script!");
+            console.error("❌ Please configure RIOT_COOKIE environment variable or edit the script!");
             process.exit(1);
         }
 
         if (DISCORD_CHANNEL_ID === "paste_your_channel_id_here") {
-            console.error("❌ Please configure DISCORD_CHANNEL_ID in the script!");
+            console.error("❌ Please configure DISCORD_CHANNEL_ID environment variable or edit the script!");
             process.exit(1);
         }
 
@@ -225,50 +443,21 @@ async function main() {
         // Create embeds
         const embeds = await createShopEmbeds(shop, auth.username);
 
-        // Wait for Discord bot to be ready
-        await new Promise((resolve) => {
-            client.once("ready", resolve);
-        });
+        // Send via bot
+        await sendShopViaBot(embeds);
 
-        console.log(`✅ Bot logged in as ${client.user.tag}`);
-
-        // Fetch channel
-        console.log(`Fetching Discord channel ${DISCORD_CHANNEL_ID}...`);
-        const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
-        
-        if (!channel) {
-            console.error("❌ Could not find Discord channel!");
-            process.exit(1);
-        }
-
-        console.log(`✅ Channel found: #${channel.name}`);
-
-        // Send to Discord
-        console.log("Sending shop to Discord...");
-        await channel.send({ embeds });
-        
         console.log("=".repeat(50));
         console.log("✅ Shop successfully sent to Discord!");
         console.log("=".repeat(50));
-        
+
     } catch (error) {
         console.error("❌ Error:", error);
         process.exit(1);
-    } finally {
-        // Disconnect
-        console.log("Disconnecting bot...");
-        client.destroy();
     }
 }
 
-// Login to Discord and start
-console.log("Logging into Discord...");
-client.login(DISCORD_BOT_TOKEN).then(() => {
-    main().catch(error => {
-        console.error("Fatal error:", error);
-        process.exit(1);
-    });
-}).catch(error => {
-    console.error("Failed to login to Discord:", error);
+// Run the main function
+main().catch(error => {
+    console.error("Fatal error:", error);
     process.exit(1);
 });

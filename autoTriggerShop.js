@@ -56,8 +56,9 @@ async function runSkinPeekAndWait() {
 async function triggerShop() {
   try {
     await runSkinPeekAndWait();
-    import { getUser } from "./valorant/auth.js";
-    import { getShop } from "./valorant/shop.js";
+    const { getUser } = await import("./valorant/auth.js");
+    const { getShop } = await import("./valorant/shop.js");
+
     // SkinPeek should have set global.client
     const client = global.client;
     if (!client) {

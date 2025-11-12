@@ -1,5 +1,5 @@
 // autoTriggerShop.js
-import './SkinPeek.js'; // run your main bot file like normal
+import { spawn } from "child_process";
 import { getUser } from './valorant/auth.js'; // import getUser from auth.js
 import { getShop } from './valorant/shop.js'; // replace with actual path
 

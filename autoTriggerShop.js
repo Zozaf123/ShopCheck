@@ -12,102 +12,101 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBit
 
 // ====== HELPERS ======
 function parseTokensFromRedirect(uri) {
-    const url = new URL(uri);
-    const hash = url.hash.substring(1); // remove #
-    const params = new URLSearchParams(hash);
-    return {
-        rso: params.get("access_token"),
-        idt: params.get("id_token")
-    };
+  const url = new URL(uri);
+  const hash = url.hash.substring(1); // remove #
+  const params = new URLSearchParams(hash);
+  return {
+    rso: params.get("access_token"),
+    idt: params.get("id_token")
+  };
 }
 
 async function getEntitlements(rso) {
-    const res = await fetch("https://entitlements.auth.riotgames.com/api/token/v1", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${rso}`,
-            "Content-Type": "application/json"
-        }
-    });
-    const data = await res.json();
-    return data.entitlements_token;
+  const res = await fetch("https://entitlements.auth.riotgames.com/api/token/v1", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${rso}`,
+      "Content-Type": "application/json"
+    }
+  });
+  if (!res.ok) throw new Error(`Failed to get entitlements: ${res.status}`);
+  const data = await res.json();
+  return data.entitlements_token;
 }
 
 async function getRegion(rso, idt) {
-    const res = await fetch("https://riot-geo.pas.si.riotgames.com/pas/v1/product/valorant", {
-        method: "PUT",
-        headers: {
-            "Authorization": `Bearer ${rso}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ id_token: idt })
-    });
-    const data = await res.json();
-    return data.affinities.live;
+  const res = await fetch("https://riot-geo.pas.si.riotgames.com/pas/v1/product/valorant", {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${rso}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ id_token: idt })
+  });
+  if (!res.ok) throw new Error(`Failed to get region: ${res.status}`);
+  const data = await res.json();
+  return data.affinities.live;
 }
 
 async function fetchShop(rso, ent, region) {
-    const url = `https://pd.${region}.a.pvp.net/store/v2/storefront/${rso}`;
-    const res = await fetch(url, {
-        headers: {
-            "Authorization": `Bearer ${rso}`,
-            "X-Riot-Entitlements-JWT": ent
-        }
-    });
-    if (!res.ok) throw new Error(`Failed to fetch shop: ${res.status}`);
-    return await res.json();
+  const url = `https://pd.${region}.a.pvp.net/store/v2/storefront/${rso}`;
+  const res = await fetch(url, {
+    headers: {
+      "Authorization": `Bearer ${rso}`,
+      "X-Riot-Entitlements-JWT": ent
+    }
+  });
+  if (!res.ok) throw new Error(`Failed to fetch shop: ${res.status}`);
+  return await res.json();
 }
 
 async function postShopToDiscord(shop) {
-    const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
-    if (!channel) throw new Error("Channel not found");
+  const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
+  if (!channel) throw new Error("Discord channel not found");
 
-    const items = shop.SkinsPanelLayout?.SingleItemOffers?.map(s => s) || [];
-    const message = items.length
-        ? "Current shop:\n" + items.join("\n")
-        : "Could not find shop items.";
+  const items = shop?.SkinsPanelLayout?.SingleItemOffers?.map(s => s) || [];
+  const message = items.length
+    ? "Current shop:\n" + items.join("\n")
+    : "Could not find shop items.";
 
-    await channel.send(message);
+  await channel.send(message);
 }
 
 // ====== MAIN ======
 async function main() {
-    try {
-        // 1. Authorize via Riot
-        const authRes = await fetch("https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&scope=account%20openid&nonce=1", {
-            headers: {
-                "User-Agent": "ShooterGame/13 Windows/10.0.19043.1.256.64bit",
-                "Cookie": VALORANT_COOKIE
-            },
-            redirect: "manual"
-        });
+  try {
+    // 1. Authorize with Riot cookie
+    const authRes = await fetch(
+      "https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&scope=account%20openid&nonce=1",
+      { headers: { "User-Agent": "ShooterGame/13 Windows/10.0.19043.1.256.64bit", "Cookie": VALORANT_COOKIE }, redirect: "manual" }
+    );
 
-        if (!authRes.headers.has("location")) throw new Error("Failed to authorize. Check your cookie.");
-        const { rso, idt } = parseTokensFromRedirect(authRes.headers.get("location"));
-        if (!rso) throw new Error("RSO token not found. Check your cookie.");
+    if (!authRes.headers.has("location")) throw new Error("Authorization failed. Check your cookie.");
+    const { rso, idt } = parseTokensFromRedirect(authRes.headers.get("location"));
+    if (!rso) throw new Error("RSO token not found. Check your cookie.");
 
-        // 2. Get entitlements and region
-        const ent = await getEntitlements(rso);
-        const region = await getRegion(rso, idt);
+    // 2. Get entitlements and region
+    const ent = await getEntitlements(rso);
+    const region = await getRegion(rso, idt);
 
-        // 3. Fetch shop
-        const shop = await fetchShop(rso, ent, region);
+    // 3. Fetch shop
+    const shop = await fetchShop(rso, ent, region);
 
-        // 4. Post to Discord
-        await postShopToDiscord(shop);
+    // 4. Post to Discord
+    await postShopToDiscord(shop);
 
-        console.log("Shop posted successfully!");
-    } catch (err) {
-        console.error("Error posting shop:", err);
-    } finally {
-        client.destroy();
-    }
+    console.log("Shop posted successfully!");
+  } catch (err) {
+    console.error("Error posting shop:", err);
+  } finally {
+    client.destroy();
+  }
 }
 
 // ====== RUN DISCORD CLIENT ======
 client.once("ready", () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-    main();
+  console.log(`Logged in as ${client.user.tag}!`);
+  main();
 });
 
 client.login(DISCORD_TOKEN);

@@ -1,54 +1,36 @@
 // autoTriggerShop.js
-import { Client, GatewayIntentBits } from "discord.js";
-import { getShop } from "./valorant/shop.js";
-import { getUser } from "./valorant/auth.js"; // <-- import directly from auth.js
+import './SkinPeek.js'; // <-- run your main bot file exactly as normal
+import { Client } from 'discord.js';
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+async function triggerShop() {
+  // Wait for the bot to be ready
+  const client = global.client; // assuming skinpeek.js exposes the client globally
+  if (!client) {
+    console.error("Client not found from SkinPeek.js!");
+    process.exit(1);
+  }
 
-// IDs
-const GUILD_ID = "1264023343577694369";
-const CHANNEL_ID = "1264023343577694372";
-const TARGET_USER_ID = "1248529349443846154";
+  await new Promise(resolve => client.once('ready', resolve));
 
-async function main() {
-  await client.login(process.env.DISCORD_TOKEN);
+  const guild = client.guilds.cache.first();
+  if (!guild) return console.error("Bot is not in any guilds.");
 
-  client.once("ready", async () => {
-    console.log(`✅ Logged in as ${client.user.tag}`);
+  const channelId = "1264023343577694372"; // channel to post shop
+  const userId = "1248529349443846154";   // user to ping
 
-    try {
-      const guild = await client.guilds.fetch(GUILD_ID);
-      const channel = await guild.channels.fetch(CHANNEL_ID);
-      const user = await client.users.fetch(TARGET_USER_ID);
+  const channel = await guild.channels.fetch(channelId);
+  const user = await client.users.fetch(userId);
 
-      // Fetch shop using your existing code
-      const userData = getUser(user.id);
-      const shopResp = await getShop(user.id, userData);
+  // Use the shop command logic directly
+  const { fetchShop } = await import('./discordShopModules.js'); // replace with actual path
+  const valorantUser = getUser(userId); // this should now work because SkinPeek initialized everything
 
-      if (!shopResp.success) {
-        await channel.send(`<@${user.id}> — failed to fetch shop.`);
-      } else {
-        const offers = shopResp.shop.SkinsPanelLayout.SingleItemOffers || [];
-        const bundles = shopResp.shop.FeaturedBundle.Bundles || [];
-        const nightMarket = shopResp.shop.BonusStore?.BonusStoreOffers || [];
+  const message = await fetchShop(null, valorantUser, userId); // null because we don’t have a real interaction
+  await channel.send({ content: `<@${user.id}>`, embeds: message.embeds });
 
-        let msg = `📦 <@${user.id}>'s shop:\n`;
-        msg += `• ${offers.length} skin offers\n`;
-        msg += `• ${bundles.length} bundles\n`;
-        msg += `• ${nightMarket.length} Night Market offers`;
-
-        await channel.send(msg);
-      }
-
-    } catch (err) {
-      console.error("Error fetching or posting shop:", err);
-      await channel.send(`<@${TARGET_USER_ID}> — error fetching shop!`);
-    }
-
-    console.log("Done. Exiting...");
-    client.destroy();
-    process.exit(0);
-  });
+  console.log("Shop posted. Exiting.");
+  client.destroy();
+  process.exit(0);
 }
 
-main();
+triggerShop();

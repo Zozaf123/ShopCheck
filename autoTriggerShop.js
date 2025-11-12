@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
-import { getUser } from "./valorant/auth.js";
-import { getShop } from "./valorant/shop.js";
+//import { getUser } from "./valorant/auth.js";
+//import { getShop } from "./valorant/shop.js";
 
 async function runSkinPeekAndWait() {
   return new Promise((resolve, reject) => {

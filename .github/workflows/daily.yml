@@ -2,7 +2,7 @@ name: Run Daily Script
 
 on:
   schedule:
-    - cron: '59 20 * * *'   # runs every day at 00:01 UTC
+    - cron: '6 21 * * *'   # runs every day at 20:59 UTC
   workflow_dispatch:
 
 jobs:
@@ -21,25 +21,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Checkout code
-        uses: actions/checkout@v2
       - name: Replace tokens in JSON
         uses: cschleiden/replace-tokens@v1
         with:
           files: 'config.json'
           tokenPrefix: '{{'
           tokenSuffix: '}}'
-          replacements: |
-            SECRET_API_KEY=${{ secrets.DISCORD_TOKEN }}
-      - name: Use updated config
-        run: |
-          cat config.json
+        env:
+          SECRET_API_KEY: ${{ secrets.DISCORD_TOKEN }}
+
+      - name: Show updated config
+        run: cat config.json
         
       - name: Run autoTriggerShop
         env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}   # required
-          USER_ID: "1248529349443846154"        # optional: user to ping
-          CHANNEL_ID: "1264023343577694372"                        # optional: channel to post into
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          USER_ID: "1248529349443846154"
+          CHANNEL_ID: "1264023343577694372"
           RIOT_ID: ${{ secrets.RIOT_ID }}
         run: node autoTriggerShop.js
-

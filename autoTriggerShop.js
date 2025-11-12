@@ -1,8 +1,8 @@
 // shopPoster.js
-import { client } from "../discord/bot.js"; // your Discord client
-import { getUser } from "./auth.js"; // your User/auth system
+import { client } from "./discord/bot.js"; // your Discord client
+import { getUser } from "./valorant/auth.js"; // your User/auth system
 import fetch from "node-fetch"; // if not already imported
-import config from "../misc/config.js";
+import config from "./misc/config.js";
 
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID; // set in env/Secrets
 const USER_ID = process.env.TARGET_USER_ID; // the user who logged in with /cookies

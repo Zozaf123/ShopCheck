@@ -4,8 +4,8 @@ import { getShop } from "./valorant/shop.js";
 import { basicEmbed } from "./discord/embed.js";
 import config from "./misc/config.js";
 
-const CHANNEL_ID = "YOUR_CHANNEL_ID_HERE"; // put the channel where you want the shop posted
-const TARGET_USER_ID = "YOUR_USER_ID_HERE"; // your Discord ID
+const CHANNEL_ID = "1264023343577694372"; // put the channel where you want the shop posted
+const TARGET_USER_ID = "1248529349443846154"; // your Discord ID
 
 async function postShop() {
     const channel = await client.channels.fetch(CHANNEL_ID);

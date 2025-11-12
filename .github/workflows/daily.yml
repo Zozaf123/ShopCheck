@@ -22,4 +22,5 @@ jobs:
         run: npm install
 
       - name: Run your script
-        run: node SkinPeek.js
+        run: node autoTriggerShop.js
+

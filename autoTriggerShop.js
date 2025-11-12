@@ -1,54 +1,45 @@
-// autoTriggerShop.js
 import { Client, GatewayIntentBits } from "discord.js";
+import config from "./misc/config.json" assert { type: "json" };
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const token = process.env.DISCORD_TOKEN; // never hard-code it
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
+
+const token = process.env.DISCORD_TOKEN || config.token;
 
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   try {
+    // Wait until guild cache is populated
+    await client.guilds.fetch();
     const guild = client.guilds.cache.first();
-    if (!guild) throw new Error("Bot is not in any guilds.");
 
-    const channelId = "1264023343577694372"; // your channel
-    const userId = "1248529349443846154";   // target user
+    if (!guild) {
+      throw new Error("Bot is not in any guilds.");
+    }
 
-    const channel = await guild.channels.fetch(channelId);
-    const user = await client.users.fetch(userId);
+    console.log(`✅ Connected to guild: ${guild.name} (${guild.id})`);
 
-    // Fake /shop interaction
-    const fakeInteraction = {
-      isCommand: () => true,
-      isAutocomplete: () => false,
-      commandName: "shop",
-      user,
-      guild,
-      channel,
-      options: { getUser: () => null },
-      reply: async payload => {
-        const msg = typeof payload === "string" ? payload : payload.content ?? "(no content)";
-        await channel.send({ content: msg, embeds: payload.embeds ?? [] });
-      },
-      followUp: async payload => { await channel.send(payload); },
-      deferReply: async () => {},
-      editReply: async payload => { await channel.send(payload); },
-      respond: async choices => { console.log("Autocomplete:", choices); },
-    };
+    const channel = guild.channels.cache.find(
+      (ch) => ch.isTextBased() && ch.viewable
+    );
 
-    console.log("📤 Emitting fake /shop interaction…");
-    client.emit("interactionCreate", fakeInteraction);
+    if (!channel) {
+      throw new Error("No accessible text channels found.");
+    }
 
-    // Exit after a short delay
-    setTimeout(() => {
-      console.log("🏁 Finished. Exiting.");
-      client.destroy();
-      process.exit(0);
-    }, 10_000);
+    await channel.send("🛒 Auto /shop check triggered!");
+
+    // TODO: trigger your fake interaction or /shop logic here
   } catch (err) {
     console.error("❌ Error during auto trigger:", err);
-    client.destroy();
-    process.exit(1);
+  } finally {
+    setTimeout(() => {
+      console.log("⏹️ Shutting down...");
+      client.destroy();
+      process.exit(0);
+    }, 5000);
   }
 });
 

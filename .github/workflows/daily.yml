@@ -20,6 +20,21 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Replace tokens in JSON
+        uses: cschleiden/replace-tokens@v1
+        with:
+          files: 'config.json'
+          tokenPrefix: '{{'
+          tokenSuffix: '}}'
+          replacements: |
+            SECRET_API_KEY=${{ secrets.API_KEY }}
+            SECRET_DB_URL=${{ secrets.DATABASE_URL }}
+      - name: Use updated config
+        run: |
+          cat config.json
         
       - name: Run autoTriggerShop
         env:

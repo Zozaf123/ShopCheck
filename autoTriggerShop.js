@@ -1,6 +1,6 @@
 // autoTriggerShop.js
 import { Client, GatewayIntentBits } from "discord.js";
-import config from "./config.js"; // adjust path if different
+import config from ".config.json" assert { type: "json" };
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],

@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits } from "discord.js";
-import config from "./misc/config.json" assert { type: "json" };
+import config from "./config.json" assert { type: "json" };
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],

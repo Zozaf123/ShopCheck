@@ -331,7 +331,8 @@ const commands = [
             choices: Object.values(WeaponType).map(weaponName => ({
                 name: weaponName,
                 value: weaponName,
-            })),
+            })) || []
+
         },
         {
             type: ApplicationCommandOptionType.User,

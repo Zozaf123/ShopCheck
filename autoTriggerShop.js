@@ -1,64 +1,69 @@
-import { Client, GatewayIntentBits } from "discord.js";
-import { spawn } from "child_process";
-import { getShop } from "./valorant/shop.js";
+// autoTriggerShop.js
+import { loadConfig } from "./misc/config.js";
+import { transferUserDataFromOldUsersJson } from "./valorant/auth.js";
+import { fetchData } from "./valorant/cache.js";
+import SkinPeek from "./SkinPeek.js"; // assume SkinPeek exports a start function that returns a promise
+import { Client, GatewayIntentBits, ActivityType, ApplicationCommandOptionType } from "discord.js";
+import { WeaponType } from "./misc/util.js"; // must import before using
 import config from "./misc/config.js";
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const TARGET_USER_ID = process.env.TARGET_USER_ID;
-const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
-
-if (!DISCORD_TOKEN || !TARGET_USER_ID || !TARGET_CHANNEL_ID) {
-    console.error("Missing environment variables. Make sure DISCORD_TOKEN, TARGET_USER_ID, and TARGET_CHANNEL_ID are set.");
-    process.exit(1);
+async function startSkinPeek() {
+    console.log("Launching SkinPeek...");
+    await SkinPeek.start(); // wait for SkinPeek to finish loading skins
+    console.log("SkinPeek finished loading!");
 }
 
-// Launch SkinPeek first
-console.log("Launching SkinPeek.js...");
-await new Promise((resolve, reject) => {
-    const skinPeek = spawn("node", ["SkinPeek.js"], { stdio: "inherit" });
+async function startBot() {
+    const client = new Client({
+        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    });
 
-    skinPeek.on("close", (code) => {
-        if (code === 0) {
-            console.log("SkinPeek finished loading!");
-            resolve();
-        } else {
-            reject(new Error(`SkinPeek exited with code ${code}`));
+    // Define commands AFTER WeaponType is ready
+    const commands = [
+        {
+            name: "collection",
+            description: "Show off your skin collection!",
+            options: [
+                {
+                    type: ApplicationCommandOptionType.String,
+                    name: "weapon",
+                    description: "Optional: see all your skins for a specific weapon",
+                    required: false,
+                    choices: Object.values(WeaponType).map((w) => ({ name: w, value: w })),
+                },
+            ],
+        },
+        // ... add other commands here
+    ];
+
+    client.once("ready", async () => {
+        console.log(`Logged in as ${client.user.tag}!`);
+        await client.user.setActivity("your store!", { type: ActivityType.Watching });
+
+        if (config.autoDeployCommands) {
+            console.log("Deploying commands...");
+            await client.application.commands.set(commands);
+            console.log("Commands deployed!");
         }
     });
+
+    await client.login(process.env.DISCORD_TOKEN);
+}
+
+async function main() {
+    const cfg = loadConfig();
+    if (!cfg) throw new Error("Failed to load config!");
+
+    transferUserDataFromOldUsersJson();
+
+    // 1. Start SkinPeek and wait for skins to load
+    await startSkinPeek();
+
+    // 2. Start Discord bot
+    await startBot();
+}
+
+main().catch((err) => {
+    console.error("Fatal error in startup:", err);
+    process.exit(1);
 });
-
-// Start Discord bot
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
-
-client.once("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-
-    try {
-        const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
-        if (!channel) throw new Error("Invalid channel ID!");
-        if (!channel.permissionsFor(client.user).has("SendMessages")) throw new Error("Bot cannot send messages in this channel!");
-
-        console.log("Fetching shop for user:", TARGET_USER_ID);
-        const shopResult = await getShop(TARGET_USER_ID);
-
-        if (!shopResult.success) {
-            console.error("Failed to fetch shop:", shopResult);
-            await channel.send("Failed to fetch shop. Make sure the user ID is correct and logged in.");
-        } else {
-            console.log("Shop fetched successfully!");
-            // Format a simple message
-            const skinNames = shopResult.shop.SkinsPanelLayout.SingleItemOffers.map(offer => offer.Offer.OfferID);
-            const message = `Daily shop for <@${TARGET_USER_ID}>:\n${skinNames.join("\n")}`;
-
-            await channel.send(message);
-            console.log("Shop posted to channel!");
-        }
-    } catch (err) {
-        console.error("Error posting shop:", err);
-    } finally {
-        client.destroy();
-        process.exit(0);
-    }
-});
-
-client.login(DISCORD_TOKEN);

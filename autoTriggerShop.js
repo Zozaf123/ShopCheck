@@ -1,7 +1,5 @@
 // autoTriggerShop.js
 import { Client, GatewayIntentBits } from "discord.js";
-import config from ".config.json" assert { type: "json" };
-
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
@@ -68,4 +66,4 @@ client.once("ready", async () => {
   }
 });
 
-client.login(config.token);
+client.login("MTI2NDAyMzg3NjUwNjIyMjYwMg.GjUHhk.a5zOjfNcN8YtErFfjH1isFOvuZ1T3ItCBty05o");

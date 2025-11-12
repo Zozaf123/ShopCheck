@@ -1,23 +1,23 @@
 // autoTriggerShop.js
 import { Client, GatewayIntentBits } from "discord.js";
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-});
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const token = process.env.DISCORD_TOKEN; // never hard-code it
 
 client.once("ready", async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   try {
-    // Replace with your own IDs
-    const guildId = "1264023343577694369";
-    const channelId = "1264023343577694372";
-    const userId = "1248529349443846154";
+    const guild = client.guilds.cache.first();
+    if (!guild) throw new Error("Bot is not in any guilds.");
 
-    const guild = await client.guilds.fetch(guildId);
+    const channelId = "1264023343577694372"; // your channel
+    const userId = "1248529349443846154";   // target user
+
     const channel = await guild.channels.fetch(channelId);
     const user = await client.users.fetch(userId);
 
-    // Create a minimal fake interaction that looks like a real /shop command
+    // Fake /shop interaction
     const fakeInteraction = {
       isCommand: () => true,
       isAutocomplete: () => false,
@@ -25,45 +25,31 @@ client.once("ready", async () => {
       user,
       guild,
       channel,
-      options: {
-        getUser: () => null, // simulate running /shop with no extra args
+      options: { getUser: () => null },
+      reply: async payload => {
+        const msg = typeof payload === "string" ? payload : payload.content ?? "(no content)";
+        await channel.send({ content: msg, embeds: payload.embeds ?? [] });
       },
-      reply: async (payload) => {
-        const message =
-          typeof payload === "string"
-            ? payload
-            : payload.content ?? "(no content)";
-        await channel.send({
-          content: message,
-          embeds: payload.embeds ?? [],
-        });
-      },
-      followUp: async (payload) => {
-        await channel.send(payload);
-      },
+      followUp: async payload => { await channel.send(payload); },
       deferReply: async () => {},
-      editReply: async (payload) => {
-        await channel.send(payload);
-      },
-      respond: async (choices) => {
-        console.log("Autocomplete response:", choices);
-      },
+      editReply: async payload => { await channel.send(payload); },
+      respond: async choices => { console.log("Autocomplete:", choices); },
     };
 
-    console.log("Emitting fake /shop interaction...");
+    console.log("📤 Emitting fake /shop interaction…");
     client.emit("interactionCreate", fakeInteraction);
 
     // Exit after a short delay
     setTimeout(() => {
-      console.log("Finished. Exiting.");
+      console.log("🏁 Finished. Exiting.");
       client.destroy();
       process.exit(0);
-    }, 10000);
+    }, 10_000);
   } catch (err) {
-    console.error("Error during auto trigger:", err);
+    console.error("❌ Error during auto trigger:", err);
     client.destroy();
     process.exit(1);
   }
 });
 
-client.login("MTI2NDAyMzg3NjUwNjIyMjYwMg.GjUHhk.a5zOjfNcN8YtErFfjH1isFOvuZ1T3ItCBty05o");
+client.login(token);

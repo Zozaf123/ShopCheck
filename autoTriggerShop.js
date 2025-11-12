@@ -10,6 +10,9 @@ const RIOT_COOKIE = process.env.RIOT_ID || "paste_your_cookie_here";
 // Discord channel ID where the shop will be sent
 const DISCORD_CHANNEL_ID = process.env.CHANNEL_ID || "paste_your_channel_id_here";
 
+// Discord user ID to ping (optional)
+const PING_USER_ID = process.env.USER_ID || null;
+
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
@@ -334,6 +337,7 @@ async function sendShopViaWebhook(shopEmbeds) {
     }
 
     const webhookData = {
+        content: PING_USER_ID ? `<@${PING_USER_ID}>` : null,
         embeds: shopEmbeds
     };
 
@@ -369,7 +373,12 @@ async function sendShopViaBot(shopEmbeds) {
         }
 
         // Spawn the main SkinPeek bot with special arguments
-        const botProcess = spawn('node', ['SkinPeek.js', '--send-shop', tempFile, DISCORD_CHANNEL_ID], {
+        const args = ['SkinPeek.js', '--send-shop', tempFile, DISCORD_CHANNEL_ID];
+        if (PING_USER_ID) {
+            args.push(PING_USER_ID);
+        }
+
+        const botProcess = spawn('node', args, {
             stdio: ['pipe', 'pipe', 'pipe'],
             cwd: process.cwd()
         });

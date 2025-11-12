@@ -24,10 +24,12 @@ if (args.length >= 3 && args[0] === '--send-shop') {
     // Handle shop sending mode
     const shopFile = args[1];
     const channelId = args[2];
+    const pingUserId = args[3] || null;
 
     console.log('Shop sending mode activated');
     console.log(`Shop file: ${shopFile}`);
     console.log(`Channel ID: ${channelId}`);
+    console.log(`Ping user ID: ${pingUserId || 'none'}`);
 
     // Import required modules
     import('fs').then(async (fs) => {
@@ -71,7 +73,12 @@ if (args.length >= 3 && args[0] === '--send-shop') {
                     process.exit(1);
                 }
 
-                await channel.send({ embeds: shopData });
+                const messageData = { embeds: shopData };
+                if (pingUserId) {
+                    messageData.content = `<@${pingUserId}>`;
+                }
+
+                await channel.send(messageData);
                 console.log('Shop sent successfully');
 
                 // Clean up and exit

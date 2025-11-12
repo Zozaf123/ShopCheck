@@ -23,5 +23,8 @@ jobs:
 
       - name: Run autoTriggerShop
         env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}   # required
+          TARGET_USER_ID: "1248529349443846154"        # optional: user to ping
+          TARGET_CHANNEL_ID: "1264023343577694372"                        # optional: channel to post into
         run: node autoTriggerShop.js
+

@@ -1,70 +1,54 @@
-import { spawn } from "child_process";
-import { getUser, getShop } from "./valorant/shop.js"; // your existing shop functions
-import fetch from "node-fetch";
+import { client } from "./discord/bot.js";
+import { getUser } from "./valorant/auth.js";
+import { getShop } from "./valorant/shop.js";
+import { basicEmbed } from "./discord/embed.js";
+import config from "./misc/config.js";
 
-const DISCORD_TOKEN = "MTI2NDAyMzg3NjUwNjIyMjYwMg.GGH6Yt.DdfADpo7pmHbVjVjMJBv3WO8RZMzMhLk-b3ftY"; // token for the bot running SkinPeek
-const CHANNEL_ID = "1264023343577694372"; // where to post the shop
-const USER_ID = "1248529349443846154"; // user whose shop to fetch
+const CHANNEL_ID = "1264023343577694372"; // put the channel where you want the shop posted
+const TARGET_USER_ID = "1248529349443846154"; // your Discord ID
 
-// Spawn SkinPeek.js
-const skinpeekProcess = spawn("node", ["SkinPeek.js"]);
-
-skinpeekProcess.stdout.on("data", async (data) => {
-    const msg = data.toString();
-    console.log("[SkinPeek]", msg);
-
-    // Wait for the skins to finish loading
-    if (msg.includes("Skins loaded!")) {
-        console.log("SkinPeek is ready, fetching shop...");
-
-        try {
-            // Get user info & shop
-            const user = getUser(USER_ID);
-            const shopResp = await getShop(USER_ID);
-
-            if (!shopResp.success) {
-                console.error("Failed to fetch shop:", shopResp);
-                return;
-            }
-
-            // Build a simple message
-            const items = shopResp.shop.SkinsPanelLayout.SingleItemOffers
-                .map(id => id) // could map to skin names if you want
-                .join(", ");
-
-            const messagePayload = {
-                content: `Posting shop for <@${USER_ID}>:\n${items}`
-            };
-
-            // Send to Discord via REST API
-            const res = await fetch(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages`, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bot ${DISCORD_TOKEN}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(messagePayload),
-            });
-
-            if (!res.ok) {
-                console.error("Failed to send message:", await res.text());
-            } else {
-                console.log("Shop posted successfully!");
-            }
-
-        } catch (err) {
-            console.error("Error fetching or posting shop:", err);
-        } finally {
-            // Stop SkinPeek process
-            skinpeekProcess.kill();
-        }
+async function postShop() {
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    if (!channel || !channel.isTextBased()) {
+        console.error("Cannot find text channel or channel is not text-based.");
+        return;
     }
-});
 
-skinpeekProcess.stderr.on("data", (data) => {
-    console.error("[SkinPeek ERR]", data.toString());
-});
+    const valorantUser = getUser(TARGET_USER_ID);
+    if (!valorantUser) {
+        await channel.send({
+            embeds: [basicEmbed("You are not registered! Run `/login` first.")]
+        });
+        return;
+    }
 
-skinpeekProcess.on("close", (code) => {
-    console.log(`SkinPeek process exited with code ${code}`);
+    // send "posting shop" message first
+    await channel.send("Posting shop...");
+
+    // fetch shop
+    const shopResp = await getShop(TARGET_USER_ID);
+    if (!shopResp.success) {
+        await channel.send({
+            embeds: [basicEmbed("Failed to fetch shop. Maybe maintenance?")]
+        });
+        return;
+    }
+
+    // format shop embed
+    const embed = {
+        title: `${valorantUser.username}'s Daily Shop`,
+        description: shopResp.shop.SkinsPanelLayout.SingleItemOffers.map(
+            (id, i) => `• Skin ID: ${id}`
+        ).join("\n"),
+        color: 0x00ff00
+    };
+
+    await channel.send({ embeds: [embed] });
+    console.log("Shop posted!");
+}
+
+// wait until client is ready
+client.once("ready", () => {
+    console.log(`Logged in as ${client.user.tag}, posting shop...`);
+    postShop().catch(console.error);
 });

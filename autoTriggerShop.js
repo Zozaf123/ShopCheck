@@ -125,6 +125,9 @@ function formatShopText(shopResp, targetUser) {
     targetUser = firstHuman?.user ?? client.user;
   }
 
+  await channel.send(`Posting shop for ${targetUser.username}...`);
+
+  
   // --- Build fake interaction ---
   const fakeInteraction = {
     isCommand: () => true,
